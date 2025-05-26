@@ -25,6 +25,7 @@ from .srm import srmq1
 
 # classifier
 from . import ensemble_classifier
+from . import xunet
 
 #
 from . import tools
@@ -76,5 +77,6 @@ __all__ = [
     'spam',
     'spam_rs',
     'ensemble_classifier',
+    'xunet'
     '__version__',
 ]

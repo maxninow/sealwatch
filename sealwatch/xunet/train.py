@@ -10,33 +10,42 @@ from torch import nn
 from torch.utils.data import DataLoader
 from torchvision import transforms
 
-from dataset import dataset
-from opts.options import arguments
-from model.model import XuNet
-from utils.utils import (
+from .dataset import DatasetLoad
+#from .options import arguments
+from .model import XuNet
+from .utils import (
     latest_checkpoint,
     adjust_learning_rate,
     weights_init,
     saver,
 )
 
-opt = arguments()
+#opt = arguments()
+def train_model(
+    cover_path="D:\\Github\\Toy-Bossbase-dataset\\bossbase_toy_dataset\\train\\cover",
+    stego_path="D:\\Github\\Toy-Bossbase-dataset\\bossbase_toy_dataset\\train\\stego",
+    valid_cover_path="D:\\Github\\Toy-Bossbase-dataset\\bossbase_toy_dataset\\valid\\cover",
+    valid_stego_path="D:\\Github\\Toy-Bossbase-dataset\\bossbase_toy_dataset\\valid\\stego",
+    checkpoints_dir="./checkpoints/",
+    batch_size=10,
+    num_epochs=50,
+    train_size=20,
+    val_size=10,
+    lr=0.001,
+):
 
-logging.basicConfig(
-    filename="training.log",
-    format="%(asctime)s %(message)s",
-    level=logging.DEBUG,
-)
+    logging.basicConfig(
+        filename="training.log",
+        format="%(asctime)s %(message)s",
+        level=logging.DEBUG,
+    )
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
-
-if __name__ == "__main__":
-
-    train_data = dataset.DatasetLoad(
-        opt.cover_path,
-        opt.stego_path,
-        opt.train_size,
+    train_data = DatasetLoad(
+        cover_path,
+        stego_path,
+        train_size,
         transform=transforms.Compose(
             [
                 transforms.ToPILImage(),
@@ -46,19 +55,19 @@ if __name__ == "__main__":
         ),
     )
 
-    val_data = dataset.DatasetLoad(
-        opt.valid_cover_path,
-        opt.valid_stego_path,
-        opt.val_size,
+    val_data = DatasetLoad(
+        valid_cover_path,
+        valid_stego_path,
+        val_size,
         transform=transforms.ToTensor(),
     )
 
     # Creating training and validation loader.
     train_loader = DataLoader(
-        train_data, batch_size=opt.batch_size, shuffle=True
+        train_data, batch_size=batch_size, shuffle=True
     )
     valid_loader = DataLoader(
-        val_data, batch_size=opt.batch_size, shuffle=False
+        val_data, batch_size=batch_size, shuffle=False
     )
 
     # model creation and initialization.
@@ -70,20 +79,20 @@ if __name__ == "__main__":
     loss_fn = nn.NLLLoss()
     optimizer = torch.optim.Adamax(
         model.parameters(),
-        lr=opt.lr,
+        lr=lr,
         betas=(0.9, 0.999),
         eps=1e-8,
         weight_decay=0,
     )
 
-    check_point = latest_checkpoint()
+    check_point = latest_checkpoint(checkpoints_dir)
     if not check_point:
         START_EPOCH = 1
-        if not os.path.exists(opt.checkpoints_dir):
-            os.makedirs(opt.checkpoints_dir)
+        if not os.path.exists(checkpoints_dir):
+            os.makedirs(checkpoints_dir)
         print("No checkpoints found!!, Retraining started... ")
     else:
-        pth = opt.checkpoints_dir + "net_" + str(check_point) + ".pt"
+        pth = checkpoints_dir + "net_" + str(check_point) + ".pt"
         ckpt = torch.load(pth)
         START_EPOCH = ckpt["epoch"] + 1
         model.load_state_dict(ckpt["model_state_dict"])
@@ -91,7 +100,7 @@ if __name__ == "__main__":
 
         print("Model Loaded from epoch " + str(START_EPOCH) + "..")
 
-    for epoch in range(START_EPOCH, opt.num_epochs + 1):
+    for epoch in range(START_EPOCH, num_epochs + 1):
         training_loss = []
         training_accuracy = []
         validation_loss = []
@@ -101,7 +110,7 @@ if __name__ == "__main__":
         # Training
         model.train()
         st_time = time.time()
-        adjust_learning_rate(optimizer, epoch)
+        adjust_learning_rate(optimizer, epoch, lr)
 
         for i, train_batch in enumerate(train_loader):
             images = torch.cat((train_batch["cover"], train_batch["stego"]), 0)
@@ -124,7 +133,7 @@ if __name__ == "__main__":
             training_accuracy.append(accuracy.item())
 
             sys.stdout.write(
-                f"\r Epoch:{epoch}/{opt.num_epochs}"
+                f"\r Epoch:{epoch}/{num_epochs}"
                 f" Batch:{i+1}/{len(train_loader)}"
                 f" Loss:{training_loss[-1]:.4f}"
                 f" Acc:{training_accuracy[-1]:.2f}"
@@ -176,7 +185,10 @@ if __name__ == "__main__":
 
         state = {
             "epoch": epoch,
-            "opt": opt,
+            "batch size": batch_size,
+            "num epochs": num_epochs,
+            "trainsize": train_size,
+            "val size": val_size,
             "train_loss": sum(training_loss) / len(training_loss),
             "valid_loss": sum(validation_loss) / len(validation_loss),
             "train_accuracy": sum(training_accuracy) / len(training_accuracy),
@@ -187,4 +199,4 @@ if __name__ == "__main__":
             "lr": optimizer.param_groups[0]["lr"],
         }
 
-        saver(state, opt.checkpoints_dir, epoch)
+        saver(state, checkpoints_dir, epoch)

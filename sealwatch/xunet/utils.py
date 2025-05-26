@@ -5,21 +5,21 @@ from typing import Any, Dict
 import torch
 from torch import nn
 
-from opts.options import arguments
+#from .options import arguments
 
-opt = arguments()
+#opt = arguments()
 
 
 def saver(state: Dict[str, float], save_dir: str, epoch: int) -> None:
     torch.save(state, save_dir + "net_" + str(epoch) + ".pt")
 
 
-def latest_checkpoint() -> int:
+def latest_checkpoint(checkpoints_dir: str) -> int:
     """Returns latest checkpoint."""
-    if os.path.exists(opt.checkpoints_dir):
-        all_chkpts = "".join(os.listdir(opt.checkpoints_dir))
+    if os.path.exists(checkpoints_dir):
+        all_chkpts = "".join(os.listdir(checkpoints_dir))
         if len(all_chkpts) > 0:
-            latest = max(map(int, re.findall("\d+", all_chkpts)))
+            latest = max(map(int, re.findall(r"\d+", all_chkpts)))
         else:
             latest = None
     else:
@@ -27,10 +27,10 @@ def latest_checkpoint() -> int:
     return latest
 
 
-def adjust_learning_rate(optimizer: Any, epoch: int) -> None:
+def adjust_learning_rate(optimizer: Any, epoch: int, lr: float) -> None:
     """Sets the learning rate to the initial learning_rate and decays by 10
     every 30 epochs."""
-    learning_rate = opt.lr * (0.1 ** (epoch // 30))
+    learning_rate = lr * (0.1 ** (epoch // 30))
     for param_group in optimizer.param_groups:
         param_group["lr"] = learning_rate
 
