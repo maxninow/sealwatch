@@ -18,7 +18,7 @@ from tqdm import tqdm
 from typing import Union, Tuple
 import zipfile
 
-import _fabrika
+from . import _fabrika
 
 
 def download_archive(
@@ -357,82 +357,42 @@ def shuffle_split_dataset(
     #
     return splits
 
+def prepare_boss(
+    input_url: str = 'https://dde.binghamton.edu/download/ImageDB/BOSSbase_1.01.zip',
+    output_dir: Union[str, Path] = 'data/boss',
+    stego_method: str = 'LSBM',
+    alpha: float = 0.4,
+    coding: str = 'optimal',
+    skip_existing: bool = False,
+    split: [float] = [0.5, 0.5],
+    names: [str] = None,
+    shuffle_seed: int = 12345,
+):
+    """Main function to prepare the BOSSBase dataset.
 
-if __name__ == '__main__':
-    # argument
-    parser = argparse.ArgumentParser(
-        description='Generating the BOSS dataset',
-    )
+    :param input_url: URL to download the dataset from
+    :param output_dir: Directory to save the dataset
+    :param stego_method: Steganographic method to use
+    :param alpha: Embedding rate
+    :param coding: Steganographic coding method
+    :param skip_existing: Whether to skip existing files
+    :param split: List of split ratios (e.g., [0.5, 0.5] for train/test)
+    :param names: Names of the splits (e.g., ['tr', 'te'])
+    :param shuffle_seed: Seed for shuffling the dataset
+    """
+    # Convert output_dir to Path
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    # paths
-    parser.add_argument(
-        '--input_url',
-        required=False,
-        default='https://dde.binghamton.edu/download/ImageDB/BOSSbase_1.01.zip',
-        type=str,
-        help='URL to zip archive',
-    )
-    parser.add_argument(
-        '--output_dir',
-        type=Path,
-        default=Path('data/boss'),
-        help='path to folder where to store the images (in a newly created subfolder)',
-    )
-    # Stego
-    parser.add_argument(
-        '--stego_method',
-        default='LSBM',
-        type=str,
-        help='stego method',
-    )
-    parser.add_argument(
-        '--alpha',
-        default=.4,
-        type=float,
-        help='embedding rate',
-    )
-    parser.add_argument(
-        '--coding',
-        default='optimal',
-        type=str,
-        help='steganographic coding',
-    )
-    # Distribution of work
-    parser.add_argument(
-        '--skip_existing',
-        action='store_true',
-        help='If given, skip existing files',
-    )
-    # Training-test split
-    parser.add_argument(
-        '--split', nargs='+', default=[.5, .5], type=float, help='split rates'
-    )
-    parser.add_argument(
-        '--names', nargs='+', required=False, type=str, default=None, help='split names, must correspond to --split'
-    )
-    parser.add_argument(
-        '--shuffle_seed',
-        default=12345,
-        type=int,
-        help='If given, images are shuffled before selecting',
-    )
-
-    # parse args
-    args = parser.parse_args()
-
-    # check paths
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-
-    #
-    if args.names is None:
-        if len(args.split) == 2:
-            args.names = ['tr', 'te']
-        elif len(args.split) == 3:
-            args.names = ['tr', 'va', 'te']
+    # Infer split names if not provided
+    if names is None:
+        if len(split) == 2:
+            names = ['tr', 'te']
+        elif len(split) == 3:
+            names = ['tr', 'va', 'te']
         else:
             raise RuntimeError(
-                f'cannot infere names from split {args.split}, '+
-                'provide names explicitly'
+                f'Cannot infer names from split {split}. Provide names explicitly.'
             )
 
     # Configure logging
@@ -441,42 +401,44 @@ if __name__ == '__main__':
         format="[%(asctime)s] %(levelname)s - %(message)s",
         datefmt="%H:%M:%S",
         handlers=[
-            logging.FileHandler(args.output_dir / "fabrika.log"),  # log to log file
+            logging.FileHandler(output_dir / "fabrika.log"),  # log to log file
             logging.StreamHandler(),  # print to stderr
         ],
     )
 
-    # download BOSS
+    # Download BOSS dataset
     zip_path = download_archive(
-        input_url=args.input_url,
-        output_dir=args.output_dir,
-        skip_existing=args.skip_existing,
+        input_url=input_url,
+        output_dir=output_dir,
+        skip_existing=skip_existing,
     )
 
-    # prepare covers
+    # Prepare covers
     prepare_covers(
         input_archive=zip_path,
-        output_dir=args.output_dir,
-        skip_existing=args.skip_existing,
+        output_dir=output_dir,
+        skip_existing=skip_existing,
     )
 
-    # prepare stegos
+    # Prepare stegos
     prepare_stego_spatial(
-        cover_dir=args.output_dir / 'images',
-        output_dir=args.output_dir,
-        stego_method=args.stego_method,
-        alpha=args.alpha,
-        coding=args.coding,
+        cover_dir=output_dir / 'images',
+        output_dir=output_dir,
+        stego_method=stego_method,
+        alpha=alpha,
+        coding=coding,
     )
 
-    # shuffle and split
+    # Shuffle and split dataset
     splits = shuffle_split_dataset(
-        args.output_dir,
-        splitpoints=args.split,
-        shuffle_seed=args.shuffle_seed,
+        dataset_path=output_dir,
+        splitpoints=split,
+        shuffle_seed=shuffle_seed,
     )
-    for split, name in zip(splits, args.names):
-        split.to_csv(
-            args.output_dir / f'split_{name}.csv',
+
+    # Save split CSVs
+    for split_df, name in zip(splits, names):
+        split_df.to_csv(
+            output_dir / f'split_{name}.csv',
             index=False,
         )
