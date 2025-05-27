@@ -30,7 +30,7 @@ class ImageProcessing(nn.Module):
 
     def forward(self, inp: Tensor) -> Tensor:
         """Returns tensor convolved with KV filter"""
-
+        self.kv_filter = self.kv_filter.to(inp.device)
         return F.conv2d(inp, self.kv_filter, stride=1, padding=2)
 
 
@@ -114,7 +114,8 @@ class XuNet(nn.Module):
 
 
 if __name__ == "__main__":
-    net = XuNet()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    net = XuNet().to(device)
     print(net)
-    inp_image = torch.randn((1, 1, 512, 512))
+    inp_image = torch.randn((1, 1, 512, 512)).to(device)
     print(net(inp_image))
