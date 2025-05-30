@@ -13,6 +13,7 @@ from torchvision import transforms
 from .dataset import DatasetLoad
 #from .options import arguments
 from .model import XuNet
+from .b0 import B0
 from .utils import (
     latest_checkpoint,
     adjust_learning_rate,
@@ -48,8 +49,9 @@ def train_model(
         train_size,
         transform=transforms.Compose(
             [
-                transforms.ToPILImage(),
-                transforms.RandomRotation(degrees=90),
+                #transforms.ToPILImage(),
+                #transforms.CenterCrop((224, 224)),
+                #transforms.RandomRotation(degrees=90),
                 transforms.ToTensor(),
             ]
         ),
@@ -59,7 +61,13 @@ def train_model(
         valid_cover_path,
         valid_stego_path,
         val_size,
-        transform=transforms.ToTensor(),
+        transform=transforms.Compose(
+            [
+                #transforms.ToPILImage(),
+                #transforms.CenterCrop((224, 224)),
+                transforms.ToTensor(),
+            ]
+        ),
     )
 
     # Creating training and validation loader.
@@ -71,12 +79,14 @@ def train_model(
     )
 
     # model creation and initialization.
-    model = XuNet()
-    model.to(device)
+    model = XuNet().to(device)
+    #model = B0(num_channels=1, num_classes=2).to(device)
+
     model = model.apply(weights_init)
 
     # Loss function and Optimizer
     loss_fn = nn.NLLLoss()
+    #loss_fn = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adamax(
         model.parameters(),
         lr=lr,
@@ -88,6 +98,7 @@ def train_model(
     check_point = latest_checkpoint(checkpoints_dir)
     if not check_point:
         START_EPOCH = 1
+        iteration = 1
         if not os.path.exists(checkpoints_dir):
             os.makedirs(checkpoints_dir)
         print("No checkpoints found!!, Retraining started... ")
@@ -100,6 +111,8 @@ def train_model(
 
         print("Model Loaded from epoch " + str(START_EPOCH) + "..")
 
+    min_val_loss = 1
+    min_val_loss_epoch = 0
     for epoch in range(START_EPOCH, num_epochs + 1):
         training_loss = []
         training_accuracy = []
@@ -110,13 +123,11 @@ def train_model(
         # Training
         model.train()
         st_time = time.time()
-        adjust_learning_rate(optimizer, epoch, lr)
+        adjust_learning_rate(optimizer, iteration, lr)
 
         for i, train_batch in enumerate(train_loader):
             images = torch.cat((train_batch["cover"], train_batch["stego"]), 0)
-            labels = torch.cat(
-                (train_batch["label"][0], train_batch["label"][1]), 0
-            )
+            labels = torch.cat((train_batch["label"][0], train_batch["label"][1]), 0)
             images = images.to(device, dtype=torch.float)
             labels = labels.to(device, dtype=torch.long)
             optimizer.zero_grad()
@@ -127,10 +138,9 @@ def train_model(
             optimizer.step()
             training_loss.append(loss.item())
             prediction = outputs.data.max(1)[1]
-            accuracy = (
-                prediction.eq(labels.data).sum() * 100.0 / (labels.size()[0])
-            )
+            accuracy = (prediction.eq(labels.data).sum() * 100.0 / (labels.size()[0]))
             training_accuracy.append(accuracy.item())
+            iteration +=1
 
             sys.stdout.write(
                 f"\r Epoch:{epoch}/{num_epochs}"
@@ -148,9 +158,7 @@ def train_model(
 
             for i, val_batch in enumerate(valid_loader):
                 images = torch.cat((val_batch["cover"], val_batch["stego"]), 0)
-                labels = torch.cat(
-                    (val_batch["label"][0], val_batch["label"][1]), 0
-                )
+                labels = torch.cat((val_batch["label"][0], val_batch["label"][1]), 0)
 
                 images = images.to(device, dtype=torch.float)
                 labels = labels.to(device, dtype=torch.long)
@@ -160,24 +168,24 @@ def train_model(
                 loss = loss_fn(outputs, labels)
                 validation_loss.append(loss.item())
                 prediction = outputs.data.max(1)[1]
-                accuracy = (
-                    prediction.eq(labels.data).sum()
-                    * 100.0
-                    / (labels.size()[0])
-                )
+                accuracy = (prediction.eq(labels.data).sum() * 100.0 / (labels.size()[0]))
                 validation_accuracy.append(accuracy.item())
 
         avg_train_loss = sum(training_loss) / len(training_loss)
         avg_valid_loss = sum(validation_loss) / len(validation_loss)
+        avg_train_accuracy = sum(training_accuracy) / len(training_accuracy)
+        avg_valid_accuracy = sum(validation_accuracy) / len(validation_accuracy)
+
+        if min_val_loss > avg_valid_loss:
+          min_val_loss_epoch = epoch
 
         message = (
             f"Epoch: {epoch}. "
-            f"Train Loss:{(sum(training_loss) / len(training_loss)):.5f}. "
-            f"Valid Loss:{(sum(validation_loss) / len(validation_loss)):.5f}. "
-            "Train"
-            f" Acc:{(sum(training_accuracy) / len(training_accuracy)):.2f} "
-            "Valid"
-            f" Acc:{(sum(validation_accuracy) / len(validation_accuracy)):.2f} "
+            f"Iteration: {iteration}. "
+            f"Train Loss:{(avg_train_loss):.5f}. "
+            f"Valid Loss:{(avg_valid_loss):.5f}. "
+            f"Train Acc:{(avg_train_accuracy):.2f} "
+            f"Valid Acc:{(avg_valid_accuracy):.2f} "
         )
         print("\n", message)
 
@@ -189,14 +197,15 @@ def train_model(
             "num epochs": num_epochs,
             "trainsize": train_size,
             "val size": val_size,
-            "train_loss": sum(training_loss) / len(training_loss),
-            "valid_loss": sum(validation_loss) / len(validation_loss),
-            "train_accuracy": sum(training_accuracy) / len(training_accuracy),
-            "valid_accuracy": sum(validation_accuracy)
-            / len(validation_accuracy),
+            "train_loss": avg_train_loss,
+            "valid_loss": avg_valid_loss,
+            "train_accuracy": avg_train_accuracy,
+            "valid_accuracy": avg_valid_accuracy,
             "model_state_dict": model.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
             "lr": optimizer.param_groups[0]["lr"],
         }
 
         saver(state, checkpoints_dir, epoch)
+    print("iterations: ", iteration)
+    print("best epoch:", min_val_loss_epoch)

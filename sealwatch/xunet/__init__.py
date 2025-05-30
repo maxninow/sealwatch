@@ -1,6 +1,7 @@
 from .train import train_model
 from .test import test_model
 from .model import XuNet
+from .b0 import B0
 from .dataset import DatasetLoad
 from .prepare_dataset import process_csv
 from .prepare_boss import prepare_boss

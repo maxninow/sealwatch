@@ -1,5 +1,6 @@
 """This module is used to test the XuNet model."""
 from glob import glob
+from tqdm import tqdm
 import torch
 import numpy as np
 import imageio as io
@@ -7,27 +8,30 @@ from .model import XuNet
 
 def test_model(
     test_batch_size = 40,
-    test_cover_path = "/path/to/cover/images/",
-    test_stego_path = "/path/to/stego/images/",
-    chkpt = "./checkpoints/XuNet_model_weights.pt"
+    test_cover_path = "./data/boss/split_te_hill_cover/*.png",
+    test_stego_path = "./data/boss/split_te_hill_stego/*.png",
+    chkpt = "./checkpoints/net_65.pt"
 ):
-
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     cover_image_names = glob(test_cover_path)
     stego_image_names = glob(test_stego_path)
+
+    if len(cover_image_names) == 0 or len(stego_image_names) == 0:
+        raise ValueError("No images found in the specified paths.")
 
     cover_labels = np.zeros((len(cover_image_names)))
     stego_labels = np.ones((len(stego_image_names)))
 
-    model = XuNet().cuda()
+    model = XuNet().to(device)
 
-    ckpt = torch.load(chkpt)
+    ckpt = torch.load(chkpt, weights_only=False)
     model.load_state_dict(ckpt["model_state_dict"])
     # pylint: disable=E1101
-    images = torch.empty((test_batch_size, 1, 256, 256), dtype=torch.float)
+    images = torch.empty((test_batch_size, 1, 512, 512), dtype=torch.float, device=device)
     # pylint: enable=E1101
     test_accuracy = []
 
-    for idx in range(0, len(cover_image_names), test_batch_size // 2):
+    for idx in tqdm(range(0, len(cover_image_names), test_batch_size // 2), desc="testing"):
         cover_batch = cover_image_names[idx : idx + test_batch_size // 2]
         stego_batch = stego_image_names[idx : idx + test_batch_size // 2]
 
@@ -47,9 +51,9 @@ def test_model(
                 yi += 1
         # pylint: disable=E1101
         for i in range(test_batch_size):
-            images[i, 0, :, :] = torch.tensor(io.imread(batch[i])).cuda()
-        image_tensor = images.cuda()
-        batch_labels = torch.tensor(batch_labels, dtype=torch.long).cuda()
+            images[i, 0, :, :] = torch.tensor(io.imread(batch[i]), device=device)
+        image_tensor = images.to(device)
+        batch_labels = torch.tensor(batch_labels, dtype=torch.long, device=device)
         # pylint: enable=E1101
         outputs = model(image_tensor)
         prediction = outputs.data.max(1)[1]
@@ -61,4 +65,4 @@ def test_model(
         )
         test_accuracy.append(accuracy.item())
 
-    print(f"test_accuracy = {sum(test_accuracy)/len(test_accuracy):%.2f}")
+    print(f"test_accuracy = {sum(test_accuracy)/len(test_accuracy):.2f}")

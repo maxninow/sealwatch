@@ -1,4 +1,5 @@
-"""Script to split prepared bossbase
+"""
+Script to split prepare bossbase
 
 Author: Max Ninow
 Affiliation: University of Innsbruck
@@ -7,6 +8,7 @@ import os
 import shutil
 import pandas as pd
 import random
+from PIL import Image
 
 def process_csv(
     csv_file: str,
@@ -74,16 +76,16 @@ def process_csv(
     for cover_path, stego_path in train_pairs:
         # cover
         if os.path.exists(cover_path):
-            new_cover_name = f"{train_cover_counter:04d}.png"
-            shutil.copy(cover_path, os.path.join(train_cover_folder, new_cover_name))
+            new_cover_name = f"{train_cover_counter:04d}.pgm"
+            save_as_pgm(cover_path, os.path.join(train_cover_folder, new_cover_name))
             train_cover_counter += 1
         else:
             print(f"Cover file not found: {cover_path}")
         
         # stego
         if os.path.exists(stego_path):
-            new_stego_name = f"{train_stego_counter:04d}.png"
-            shutil.copy(stego_path, os.path.join(train_stego_folder, new_stego_name))
+            new_stego_name = f"{train_stego_counter:04d}.pgm"
+            save_as_pgm(stego_path, os.path.join(train_stego_folder, new_stego_name))
             train_stego_counter += 1
         else:
             print(f"Stego file not found: {stego_path}")
@@ -99,16 +101,33 @@ def process_csv(
         for cover_path, stego_path in val_pairs:
             # cover
             if os.path.exists(cover_path):
-                new_cover_name = f"{val_cover_counter:04d}.png"
-                shutil.copy(cover_path, os.path.join(val_cover_folder, new_cover_name))
+                new_cover_name = f"{val_cover_counter:04d}.pgm"
+                save_as_pgm(cover_path, os.path.join(val_cover_folder, new_cover_name))
                 val_cover_counter += 1
             else:
                 print(f"Cover file not found: {cover_path}")
             
             # stego
             if os.path.exists(stego_path):
-                new_stego_name = f"{val_stego_counter:04d}.png"
-                shutil.copy(stego_path, os.path.join(val_stego_folder, new_stego_name))
+                new_stego_name = f"{val_stego_counter:04d}.pgm"
+                save_as_pgm(stego_path, os.path.join(val_stego_folder, new_stego_name))
                 val_stego_counter += 1
             else:
                 print(f"Stego file not found: {stego_path}")
+
+
+def save_as_pgm(input_path: str, output_path: str) -> None:
+    """
+    Converts an image to .pgm format and saves it.
+
+    :param input_path: Path to the input image.
+    :param output_path: Path to save the .pgm image.
+    :return: None
+    """
+    try:
+        with Image.open(input_path) as img:
+            # Ensure the image is in grayscale mode
+            img = img.convert("L")
+            img.save(output_path, format="PPM")  # Save as .pgm (Pillow uses "PPM" for .pgm files)
+    except Exception as e:
+        print(f"Error converting {input_path} to .pgm: {e}")
