@@ -1,133 +1,82 @@
 """
-Script to split prepare bossbase
+Script to organize BOSSBase dataset into train and test splits.
 
 Author: Max Ninow
 Affiliation: University of Innsbruck
 """
 import os
-import shutil
 import pandas as pd
-import random
-from PIL import Image
+from shutil import copy2
 
-def process_csv(
-    csv_file: str,
+
+def process_csvs(
+    train_csv: str,
+    test_csv: str,
     base_path: str,
-    name: str,
-    split_factor: int = None,
+    stego_method: str,
 ) -> None:
     """
-    Processes a CSV file as provided from prepare_boss.py, splits the data into training and validation sets 
-    (or test sets if no split factor is provided), and organizes the images into corresponding folders.
+    Processes training and testing CSV files, filters stego images by the specified stego method,
+    and organizes the images into corresponding folders for cover and stego images.
 
-    :param csv_file: Name of the CSV file to process.
-    :param base_path: Base directory where the CSV file and image files are located.
-    :param name: A label used to name the output folders (e.g., 'lsbm' for 'split_tr_lsbm_stego' and 'split_tr_lsbm_cover').
-    :param split_factor: Factor to split the data into training and validation sets. For example, a split_factor of 5 
-                         results in an 80% train and 20% validation split. If None, the function assumes the data is for 
-                         testing and does not create a validation set.
+    :param train_csv: Name of the CSV file for the training split.
+    :param test_csv: Name of the CSV file for the testing split.
+    :param base_path: Base directory where the CSV files and image files are located.
+    :param stego_method: The stego method to filter stego images (e.g., 'hill').
     :return: None
     """
+    def process_single_csv(csv_file, split_type):
+        """
+        Helper function to process a single CSV file and organize images into folders.
 
-    csv_file_path = os.path.join(base_path, csv_file)
-    df = pd.read_csv(csv_file_path)
-    print(f"Total rows in CSV: {len(df)}")
-    
-    # group cover and stego images as pairs
-    pairs = []
-    for _, row in df.iterrows():
-        image_path = os.path.join(base_path, row['name'])
-        
-        if "stego" in image_path:
-            filename = os.path.basename(image_path)
-            # find corresponding cover image
-            cover_path = os.path.join(base_path, "images", filename)
-            pairs.append((cover_path, image_path))
-    
-    print(f"Total pairs: {len(pairs)}")
-    
-    random.seed(42)  # seed for reproducibility
-    random.shuffle(pairs)
-    
-    # Split into train and validation sets based on the split factor
-    if split_factor:
-        train_size = int(len(pairs) * ((split_factor - 1) / split_factor))
-        train_pairs = pairs[:train_size]
-        val_pairs = pairs[train_size:]
-        print(f"Train pairs: {len(train_pairs)}, Validation pairs: {len(val_pairs)}")
-        train_stego_folder = os.path.join(base_path, ("split_tr_" + name + "_stego"))
-        train_cover_folder = os.path.join(base_path, ("split_tr_" + name + "_cover"))
-    
-    # no split, hence test set
-    else:
-        train_pairs = pairs
-        val_pairs = []
-        train_stego_folder = os.path.join(base_path, ("split_te_" + name + "_stego"))
-        train_cover_folder = os.path.join(base_path, ("split_te_" + name + "_cover"))
-    
-    
-    os.makedirs(train_stego_folder, exist_ok=True)
-    os.makedirs(train_cover_folder, exist_ok=True)
-    
-    
-    # copy train pairs
-    train_cover_counter = 1
-    train_stego_counter = 1
-    for cover_path, stego_path in train_pairs:
-        # cover
-        if os.path.exists(cover_path):
-            new_cover_name = f"{train_cover_counter:04d}.pgm"
-            save_as_pgm(cover_path, os.path.join(train_cover_folder, new_cover_name))
-            train_cover_counter += 1
-        else:
-            print(f"Cover file not found: {cover_path}")
-        
-        # stego
-        if os.path.exists(stego_path):
-            new_stego_name = f"{train_stego_counter:04d}.pgm"
-            save_as_pgm(stego_path, os.path.join(train_stego_folder, new_stego_name))
-            train_stego_counter += 1
-        else:
-            print(f"Stego file not found: {stego_path}")
-    
-    # copy validation pairs
-    if val_pairs:
-        val_stego_folder = os.path.join(base_path, ("split_val_" + name + "_stego"))
-        val_cover_folder = os.path.join(base_path, ("split_val_" + name + "_cover"))
-        os.makedirs(val_stego_folder, exist_ok=True)
-        os.makedirs(val_cover_folder, exist_ok=True)
-        val_cover_counter = 1
-        val_stego_counter = 1
-        for cover_path, stego_path in val_pairs:
-            # cover
-            if os.path.exists(cover_path):
-                new_cover_name = f"{val_cover_counter:04d}.pgm"
-                save_as_pgm(cover_path, os.path.join(val_cover_folder, new_cover_name))
-                val_cover_counter += 1
-            else:
-                print(f"Cover file not found: {cover_path}")
-            
-            # stego
+        :param csv_file: Name of the CSV file to process.
+        :param split_type: Type of split ('tr' for training or 'te' for testing).
+        """
+        csv_file_path = os.path.join(base_path, csv_file)
+        df = pd.read_csv(csv_file_path)
+        print(f"Processing {split_type} split: {len(df)} rows in CSV.")
+
+        # Filter stego images by the specified stego method
+        stego_df = df[df["stego_method"] == stego_method]
+        print(f"Filtered {len(stego_df)} stego images for method '{stego_method}'.")
+
+        # Create output directories for cover and stego images
+        cover_folder = os.path.join(base_path, f"split_{split_type}_cover")
+        stego_folder = os.path.join(base_path, f"split_{split_type}_{stego_method}_stego")
+        os.makedirs(stego_folder, exist_ok=True)
+
+        # Check if cover folder exists
+        cover_exists = os.path.exists(cover_folder)
+        if not cover_exists:
+            os.makedirs(cover_folder, exist_ok=True)
+
+        # Process stego images
+        stego_count = 0
+        for _, row in stego_df.iterrows():
+            stego_path = os.path.join(base_path, row["name"])
             if os.path.exists(stego_path):
-                new_stego_name = f"{val_stego_counter:04d}.pgm"
-                save_as_pgm(stego_path, os.path.join(val_stego_folder, new_stego_name))
-                val_stego_counter += 1
+                copy2(stego_path, stego_folder)
+                stego_count += 1
             else:
                 print(f"Stego file not found: {stego_path}")
 
+        # Process cover images if the cover folder does not already exist
+        if not cover_exists:
+            cover_count = 0
+            for _, row in df.iterrows():
+                if "stego" not in row["name"]:  # Cover images do not contain "stego" in their name
+                    cover_path = os.path.join(base_path, row["name"])
+                    if os.path.exists(cover_path):
+                        copy2(cover_path, cover_folder)
+                        cover_count += 1
+                    else:
+                        print(f"Cover file not found: {cover_path}")
+            print(f"Copied {cover_count} cover images to {cover_folder}.")
+        else:
+            print(f"Cover folder already exists: {cover_folder}. Skipping cover image copying.")
 
-def save_as_pgm(input_path: str, output_path: str) -> None:
-    """
-    Converts an image to .pgm format and saves it.
+        print(f"Copied {stego_count} stego images to {stego_folder}.")
 
-    :param input_path: Path to the input image.
-    :param output_path: Path to save the .pgm image.
-    :return: None
-    """
-    try:
-        with Image.open(input_path) as img:
-            # Ensure the image is in grayscale mode
-            img = img.convert("L")
-            img.save(output_path, format="PPM")  # Save as .pgm (Pillow uses "PPM" for .pgm files)
-    except Exception as e:
-        print(f"Error converting {input_path} to .pgm: {e}")
+    # Process training and testing splits
+    process_single_csv(train_csv, split_type="tr")
+    process_single_csv(test_csv, split_type="te")

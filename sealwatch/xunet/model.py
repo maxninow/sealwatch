@@ -1,9 +1,5 @@
-"""
-This is unofficial implementation of XuNet: Structural Design of Convolutional
-Neural Networks for Steganalysis . """
 import torch
-from torch import Tensor
-from torch import nn
+from torch import nn, Tensor
 import torch.nn.functional as F
 
 
@@ -12,9 +8,7 @@ class ImageProcessing(nn.Module):
 
     def __init__(self) -> None:
         """Constructor"""
-
         super().__init__()
-        # pylint: disable=E1101
         self.kv_filter = (
             torch.tensor(
                 [
@@ -23,19 +17,19 @@ class ImageProcessing(nn.Module):
                     [-2.0, 8.0, -12.0, 8.0, -2.0],
                     [2.0, -6.0, 8.0, -6.0, 2.0],
                     [-1.0, 2.0, -2.0, 2.0, -1.0],
-                ],
+                ]
             ).view(1, 1, 5, 5)
             / 12.0
-        )  # pylint: enable=E1101
+        )
 
     def forward(self, inp: Tensor) -> Tensor:
         """Returns tensor convolved with KV filter"""
-        self.kv_filter = self.kv_filter.to(inp.device)
-        return F.conv2d(inp, self.kv_filter, stride=1, padding=2)
+        kv_filter = self.kv_filter.to(inp.device)  # Move filter to the correct device
+        return F.conv2d(inp, kv_filter, stride=1, padding=2)
 
 
 class ConvBlock(nn.Module):
-    """This class returns building block for XuNet class."""
+    """This class returns a building block for XuNet."""
 
     def __init__(
         self,
@@ -43,79 +37,58 @@ class ConvBlock(nn.Module):
         out_channels: int,
         kernel_size: int,
         activation: str = "relu",
-        abs: str = False,
+        use_abs: bool = False,
     ) -> None:
         super().__init__()
+        padding = kernel_size // 2 if kernel_size > 1 else 0
 
-        if kernel_size == 5:
-            self.padding = 2
-        else:
-            self.padding = 0
-
-        if activation == "tanh":
-            self.activation = nn.Tanh()
-        else:
-            self.activation = nn.ReLU()
-
-        self.abs = abs
         self.conv = nn.Conv2d(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride=1,
-            padding=self.padding,
-            bias=False,
+            in_channels, out_channels, kernel_size, stride=1, padding=padding, bias=False
         )
         self.batch_norm = nn.BatchNorm2d(out_channels)
+        self.activation = nn.Tanh() if activation == "tanh" else nn.ReLU()
+        self.use_abs = use_abs
         self.pool = nn.AvgPool2d(kernel_size=5, stride=2, padding=2)
 
     def forward(self, inp: Tensor) -> Tensor:
-        """Returns conv->batch_norm."""
-        if self.abs:
-            return self.pool(
-                self.activation(self.batch_norm(torch.abs(self.conv(inp))))
-            )
-        return self.pool(self.activation(self.batch_norm(self.conv(inp))))
+        """Returns conv -> batch_norm -> activation -> pooling."""
+        x = self.conv(inp)
+        x = self.batch_norm(x)
+        if self.use_abs:
+            x = torch.abs(x)
+        x = self.activation(x)
+        x = self.pool(x)
+        return x
 
 
 class XuNet(nn.Module):
-    """This class returns XuNet model."""
+    """This class returns the XuNet model."""
 
     def __init__(self) -> None:
         super().__init__()
-        self.layer1 = ConvBlock(
-            1, 8, kernel_size=5, activation="tanh", abs=True
-        )
+        self.image_processing = ImageProcessing()
+        self.layer1 = ConvBlock(1, 8, kernel_size=5, activation="tanh", use_abs=True)
         self.layer2 = ConvBlock(8, 16, kernel_size=5, activation="tanh")
         self.layer3 = ConvBlock(16, 32, kernel_size=1)
         self.layer4 = ConvBlock(32, 64, kernel_size=1)
         self.layer5 = ConvBlock(64, 128, kernel_size=1)
         self.gap = nn.AdaptiveAvgPool2d(output_size=1)
-        self.fully_connected = nn.Sequential(
-            nn.Linear(in_features=128, out_features=128),
+        self.fc = nn.Sequential(
+            nn.Linear(128, 128),
             nn.ReLU(inplace=True),
-            nn.Linear(in_features=128, out_features=2),
+            nn.Linear(128, 2),
             nn.LogSoftmax(dim=1),
         )
 
     def forward(self, image: Tensor) -> Tensor:
-        """Returns logit for the given tensor."""
-        with torch.no_grad():
-            out = ImageProcessing()(image)
-        out = self.layer1(out)
-        out = self.layer2(out)
-        out = self.layer3(out)
-        out = self.layer4(out)
-        out = self.layer5(out)
-        out = self.gap(out)
-        out = out.view(out.size(0), -1)
-        out = self.fully_connected(out)
-        return out
-
-
-if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    net = XuNet().to(device)
-    print(net)
-    inp_image = torch.randn((1, 1, 512, 512)).to(device)
-    print(net(inp_image))
+        """Returns logits for the given tensor."""
+        x = self.image_processing(image)
+        x = self.layer1(x)
+        x = self.layer2(x)
+        x = self.layer3(x)
+        x = self.layer4(x)
+        x = self.layer5(x)
+        x = self.gap(x)
+        x = x.view(x.size(0), -1)  # Flatten
+        x = self.fc(x)
+        return x
