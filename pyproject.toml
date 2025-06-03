@@ -19,7 +19,8 @@ dependencies = [
   "pillow",
   "torch",
   "torchvision",
-  "tqdm"
+  "tqdm",
+  "torchmetrics"
 ]
 requires-python = ">= 3.8"
 authors = [
