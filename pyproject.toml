@@ -20,7 +20,8 @@ dependencies = [
   "torch",
   "torchvision",
   "tqdm",
-  "torchmetrics"
+  "torchmetrics",
+  "imageio"
 ]
 requires-python = ">= 3.8"
 authors = [
