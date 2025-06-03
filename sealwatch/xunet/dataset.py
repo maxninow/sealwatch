@@ -3,7 +3,8 @@ from typing import Tuple, Dict
 import torch
 from torch import Tensor
 from torch.utils.data import Dataset
-import imageio as io
+import imageio.v2 as io
+from pathlib import Path
 
 
 class DatasetLoad(Dataset):
@@ -24,19 +25,27 @@ class DatasetLoad(Dataset):
             size (int): Number of images in the dataset.
             transform (Tuple, optional): Transformations to apply. Defaults to None.
         """
-        self.cover = cover_path
-        self.stego = stego_path
+        self.cover = Path(cover_path)
+        self.stego = Path(stego_path)
         self.transforms = transform
-        self.data_size = size
+
+        # Validate paths
+        if not self.cover.is_dir():
+            raise ValueError(f"Cover path '{self.cover}' is not a valid directory.")
+        if not self.stego.is_dir():
+            raise ValueError(f"Stego path '{self.stego}' is not a valid directory.")
 
         # Dynamically list all valid image files in the directories
         valid_extensions = (".pgm", ".png")
         self.cover_files = sorted(
             [f for f in os.listdir(self.cover) if f.lower().endswith(valid_extensions)]
-        )[:self.data_size]
+        )
         self.stego_files = sorted(
             [f for f in os.listdir(self.stego) if f.lower().endswith(valid_extensions)]
-        )[:self.data_size]
+        )
+
+        self.data_size = min(size, len(self.cover_files), len(self.stego_files))
+
 
         if len(self.cover_files) != len(self.stego_files):
             raise ValueError("Mismatch between cover and stego image counts.")
@@ -54,6 +63,8 @@ class DatasetLoad(Dataset):
         Returns:
             Dict[str, Tensor]: Dictionary containing cover image, stego image, and labels.
         """
+        if index >= self.data_size:
+            raise IndexError(f"Index {index} is out of range for dataset of size {self.data_size}.")
         cover_img_path = os.path.join(self.cover, self.cover_files[index])
         stego_img_path = os.path.join(self.stego, self.stego_files[index])
 

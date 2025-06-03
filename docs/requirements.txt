@@ -2,3 +2,9 @@ wheel>0.30.0
 numpy>=1.18.0
 sphinx==5.3.0
 readthedocs-sphinx-search==0.3.2
+torch>=1.10.0
+tqdm>=4.64.0
+torchvision>=0.11.0
+torchmetrics>=0.10.0
+Pillow>=9.0.0
+imageio>=2.19.0

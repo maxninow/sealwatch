@@ -1,3 +1,14 @@
+"""Implementation of Xunet.
+
+Based on IEEE Signal Processing Letter 2016 paper:
+Guanshuo Xu, Han-Zhou Wu, Yun-Qing Shi
+CNN tailored to steganalysis, with facilitated statistical modeling.
+
+Inspired by implementation by Brijesh Singh.
+
+Author: Max Ninow
+Affiliation: University of Innsbruck
+"""
 import torch
 from torch import nn, Tensor
 import torch.nn.functional as F
@@ -24,7 +35,7 @@ class ImageProcessing(nn.Module):
 
     def forward(self, inp: Tensor) -> Tensor:
         """Returns tensor convolved with KV filter"""
-        kv_filter = self.kv_filter.to(inp.device)  # Move filter to the correct device
+        kv_filter = self.kv_filter.to(inp.device)
         return F.conv2d(inp, kv_filter, stride=1, padding=2)
 
 
@@ -40,13 +51,22 @@ class ConvBlock(nn.Module):
         use_abs: bool = False,
     ) -> None:
         super().__init__()
-        padding = kernel_size // 2 if kernel_size > 1 else 0
+        padding = (kernel_size - 1) // 2
 
         self.conv = nn.Conv2d(
-            in_channels, out_channels, kernel_size, stride=1, padding=padding, bias=False
+            in_channels,
+            out_channels,
+            kernel_size,
+            stride=1,
+            padding=padding,
+            bias=False
         )
         self.batch_norm = nn.BatchNorm2d(out_channels)
-        self.activation = nn.Tanh() if activation == "tanh" else nn.ReLU()
+        if activation == "tanh":
+            self.activation = nn.Tanh()
+        else:
+            self.activation = nn.ReLU(inplace=True)
+
         self.use_abs = use_abs
         self.pool = nn.AvgPool2d(kernel_size=5, stride=2, padding=2)
 
@@ -62,7 +82,17 @@ class ConvBlock(nn.Module):
 
 
 class XuNet(nn.Module):
-    """This class returns the XuNet model."""
+    """
+    XuNet: A convolutional neural network for steganalysis.
+
+    Architecture:
+    - Preprocessing with high pass filter
+    - 5 convolutional layers with batch normalization and activation
+    - Global average pooling
+    - Fully connected layers with softmax output
+
+    Intended for binary classification of stego and cover images.
+    """
 
     def __init__(self) -> None:
         super().__init__()
@@ -83,12 +113,18 @@ class XuNet(nn.Module):
     def forward(self, image: Tensor) -> Tensor:
         """Returns logits for the given tensor."""
         x = self.image_processing(image)
+
+        # Pass through convolutional layers
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
         x = self.layer5(x)
+
+        # Global average pooling
         x = self.gap(x)
-        x = x.view(x.size(0), -1)  # Flatten
+
+        # Flatten and pass through fully connected layers
+        x = x.view(x.size(0), -1)
         x = self.fc(x)
         return x

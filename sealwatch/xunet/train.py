@@ -1,8 +1,18 @@
+"""Implementation of Xunet.
+
+Based on IEEE Signal Processing Letter 2016 paper:
+Guanshuo Xu, Han-Zhou Wu, Yun-Qing Shi
+CNN tailored to steganalysis, with facilitated statistical modeling.
+
+Inspired by implementation by Brijesh Singh.
+
+Author: Max Ninow
+Affiliation: University of Innsbruck
+"""
 import os
-import logging
 import torch
 from torch import nn
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchmetrics import Accuracy
 from sklearn.base import BaseEstimator, ClassifierMixin
@@ -24,17 +34,17 @@ class XuNetTrainer(BaseEstimator, ClassifierMixin):
                  min_lr=1e-6,
                  device=None):
         """
-        Initializes the XuNet classifier.
+        Initializes the XuNetTrainer class.
 
         Args:
             checkpoints_dir (str): Directory to save model checkpoints.
-            batch_size (int): Batch size for training.
+            batch_size (int): Batch size for training and testing.
             num_epochs (int): Number of training epochs.
-            lr (float): Learning rate.
-            factor (float): Factor for learning rate reduction.
-            patience (int): Patience for learning rate scheduler.
+            lr (float): Initial learning rate.
+            factor (float): Factor by which the learning rate is reduced.
+            patience (int): Number of epochs with no improvement before reducing the learning rate.
             min_lr (float): Minimum learning rate.
-            device (str): Device to use ('cuda' or 'cpu').
+            device (str, optional): Device to use ('cuda' or 'cpu'). Defaults to 'cuda' if available.
         """
         self.batch_size = batch_size
         self.num_epochs = num_epochs
@@ -44,6 +54,8 @@ class XuNetTrainer(BaseEstimator, ClassifierMixin):
         self.min_lr = min_lr
         self.checkpoints_dir = checkpoints_dir
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.train_accuracy = Accuracy(task="binary").to(self.device)
+        self.val_accuracy = Accuracy(task="binary").to(self.device)
 
         # Initialize model, loss, optimizer, and scheduler
         self.model = XuNet().to(self.device)
@@ -55,49 +67,32 @@ class XuNetTrainer(BaseEstimator, ClassifierMixin):
         self.train_accuracy = Accuracy(task="binary").to(self.device)
         self.val_accuracy = Accuracy(task="binary").to(self.device)
 
-        self.transform = transforms.ToTensor()                         # Convert to PyTorch tensor
+        self.transform = transforms.ToTensor()
 
         # Create checkpoints directory if it doesn't exist
         if not os.path.exists(self.checkpoints_dir):
             os.makedirs(self.checkpoints_dir)
 
-    def train_one_epoch(self, model, dataloader, loss_fn, optimizer, device, metric, epoch, num_epochs):
-        model.train()
+    def run_epoch(self, model, dataloader, loss_fn, optimizer, device, metric, epoch, num_epochs, train=True):
+        model.train() if train else model.eval()
         epoch_loss = 0
         metric.reset()
-        progress_bar = tqdm(dataloader, desc=f"Epoch [{epoch}/{num_epochs}]")
-        for batch_X, batch_y in progress_bar:
-            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+        progress_bar = tqdm(dataloader, desc=f"{'Train' if train else 'Validation'} [{epoch}/{num_epochs}]")
+        with torch.set_grad_enabled(train):
+            for batch in progress_bar:
+                images = torch.cat((batch["cover"], batch["stego"]), 0).to(self.device)
+                labels = torch.cat((batch["label"][0], batch["label"][1]), 0).to(self.device)
 
-            optimizer.zero_grad()
-            outputs = model(batch_X)
-            loss = loss_fn(outputs, batch_y)
-            loss.backward()
-            optimizer.step()
+                if train:
+                    optimizer.zero_grad()
+                outputs = model(images)
+                loss = loss_fn(outputs, labels)
+                if train:
+                    loss.backward()
+                    optimizer.step()
 
-            epoch_loss += loss.item()
-            metric.update(outputs.argmax(dim=1), batch_y)
-
-            # Update progress bar
-            progress_bar.set_postfix(
-                loss=loss.item(), acc=metric.compute().item()
-            )
-
-        return epoch_loss / len(dataloader), metric.compute()
-
-    def validate_one_epoch(self, model, dataloader, loss_fn, device, metric, epoch, num_epochs):
-        model.eval()
-        epoch_loss = 0
-        metric.reset()
-        progress_bar = tqdm(dataloader, desc=f"Validation [{epoch}/{num_epochs}]")
-        with torch.no_grad():
-            for batch_X, batch_y in progress_bar:
-                batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-
-                outputs = model(batch_X)
-                loss = loss_fn(outputs, batch_y)
                 epoch_loss += loss.item()
-                metric.update(outputs.argmax(dim=1), batch_y)
+                metric.update(outputs.argmax(dim=1), labels)
 
                 # Update progress bar
                 progress_bar.set_postfix(
@@ -107,31 +102,34 @@ class XuNetTrainer(BaseEstimator, ClassifierMixin):
         return epoch_loss / len(dataloader), metric.compute()
 
     def fit(
-        cover_path,
-        stego_path,
-        valid_cover_path,
-        valid_stego_path,):
+            self,
+            cover_path,
+            stego_path,
+            valid_cover_path,
+            valid_stego_path,
+            train_size,
+            val_size):
         """
-        Trains the model using the provided training and validation data.
+        Trains the model using the provided training and validation datasets.
 
         Args:
-            X_train (np.ndarray): Training features (images).
-            y_train (np.ndarray): Training labels.
-            X_val (np.ndarray): Validation features (images).
-            y_val (np.ndarray): Validation labels.
+            cover_path (str): Path to the directory containing cover images for training.
+            stego_path (str): Path to the directory containing stego images for training.
+            valid_cover_path (str): Path to the directory containing cover images for validation.
+            valid_stego_path (str): Path to the directory containing stego images for validation.
+            train_size (int): Number of training pairs to train on.
+            val_size (int): Number of validation pairs to train on.
 
         Returns:
-            self
+            self: The trained XuNetTrainer instance.
         """
-        # Set up logging
-        logging.basicConfig(filename="training.log", level=logging.INFO)
 
         # Dataset and DataLoader
         train_data = DatasetLoad(
-            cover_path, stego_path, self.train_size, transform=transforms.ToTensor()
+            cover_path, stego_path, train_size, transform=transforms.ToTensor()
         )
         val_data = DatasetLoad(
-            valid_cover_path, valid_stego_path, self.val_size, transform=transforms.ToTensor()
+            valid_cover_path, valid_stego_path, val_size, transform=transforms.ToTensor()
         )
 
         train_loader = DataLoader(train_data, batch_size=self.batch_size, shuffle=True)
@@ -140,8 +138,26 @@ class XuNetTrainer(BaseEstimator, ClassifierMixin):
         # Training loop
         best_val_loss = float("inf")
         for epoch in range(1, self.num_epochs + 1):
-            train_loss, train_acc = self.train_one_epoch(self.model, train_loader, self.loss_fn, self.optimizer, self.device, self.train_accuracy, epoch, self.num_epochs)
-            val_loss, val_acc = self.validate_one_epoch(self.model, val_loader, self.loss_fn, self.device, self.val_accuracy, epoch, self.num_epochs)
+            train_loss, train_acc = self.run_epoch(
+                                                self.model,
+                                                train_loader,
+                                                self.loss_fn,
+                                                self.optimizer,
+                                                self.device,
+                                                self.train_accuracy,
+                                                epoch,
+                                                self.num_epochs,
+                                                train=True)
+            val_loss, val_acc = self.run_epoch(
+                                                self.model,
+                                                val_loader,
+                                                self.loss_fn,
+                                                self.optimizer,
+                                                self.device,
+                                                self.val_accuracy,
+                                                epoch,
+                                                self.num_epochs,
+                                                train=False)
 
             # Scheduler step
             self.scheduler.step(val_loss)
@@ -150,12 +166,10 @@ class XuNetTrainer(BaseEstimator, ClassifierMixin):
             current_lr = self.optimizer.param_groups[0]["lr"]
             print(
                 f"Epoch [{epoch}/{self.num_epochs}] Summary: "
-                f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}, "
-                f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}, "
+                f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, "
+                f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}, "
                 f"Learning Rate: {current_lr:.6f}"
             )
-            logging.info(f"Epoch {epoch}: Train Loss={train_loss:.4f}, Train Acc={train_acc:.2f}, "
-                         f"Val Loss={val_loss:.4f}, Val Acc={val_acc:.2f}, LR={current_lr:.6f}")
 
             # Save best model
             if val_loss < best_val_loss:
@@ -165,7 +179,7 @@ class XuNetTrainer(BaseEstimator, ClassifierMixin):
         print("Training complete.")
         return self
 
-    def predict(self, image_path):
+    def predict(self, image_path: str) -> str:
         """
         Predicts whether a given image is stego or cover.
 
@@ -177,31 +191,33 @@ class XuNetTrainer(BaseEstimator, ClassifierMixin):
         """
         # Load and preprocess the image
         image = Image.open(image_path)
-        image = self.transform(image)  # Apply the same transform used during training
-        image = image.unsqueeze(0).to(self.device)  # Add batch dimension and move to device
+        image = self.transform(image)
+        image = image.unsqueeze(0).to(self.device)
 
         # Set the model to evaluation mode
         self.model.eval()
         with torch.no_grad():
             output = self.model(image)
-            prediction = output.argmax(dim=1)  # Get the predicted class (0 or 1)
+            prediction = output.argmax(dim=1)
 
         # Map the prediction to "stego" or "cover"
         return "stego" if prediction == 1 else "cover"
 
     def load_model(self, checkpoint_path_in=None):
         """
-        Loads the model weights from a checkpoint. If no path is provided, 
+        Loads the model weights from a checkpoint. If no path is provided,
         loads the default model from the package folder.
 
         Args:
-            checkpoint_path (str, optional): Path to the checkpoint file. 
-                                            If None, loads the default model.
+            checkpoint_path_in (str, optional): Path to the checkpoint file.
+                                                If None, loads the default model.
         """
         # Default path to the model in the package folder
         if checkpoint_path_in is None:
             package_dir = os.path.dirname(os.path.abspath(__file__))  # Get the package folder
             checkpoint_path = os.path.join(package_dir, "default_model.pt")  # Default model path
+        else:
+            checkpoint_path = checkpoint_path_in
 
         # Check if the checkpoint file exists
         if not os.path.exists(checkpoint_path):
@@ -210,12 +226,11 @@ class XuNetTrainer(BaseEstimator, ClassifierMixin):
         # Load the model weights
         self.model.load_state_dict(torch.load(checkpoint_path, map_location=self.device))
         self.model.to(self.device)
-        
-        if checkpoint_path_in is None:
-            print(f"Default model loaded")
-        else:    
-            print(f"Model loaded from {checkpoint_path}")
 
+        if checkpoint_path_in is None:
+            print("Default model loaded")
+        else:
+            print(f"Model loaded from {checkpoint_path}")
 
     def test(self, test_cover_path, test_stego_path, test_size=100):
         """
@@ -224,9 +239,10 @@ class XuNetTrainer(BaseEstimator, ClassifierMixin):
         Args:
             test_cover_path (str): Path to the directory containing cover images for testing.
             test_stego_path (str): Path to the directory containing stego images for testing.
+            test_size (int, optional): Number of samples to use for testing. Defaults to 100.
 
         Returns:
-            dict: A dictionary containing test loss and test accuracy.
+            tuple: Average test loss and test accuracy.
         """
         # Load the test dataset
         test_data = DatasetLoad(
