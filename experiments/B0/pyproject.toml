@@ -1,0 +1,22 @@
+[tool.poetry]
+name = "B0"
+version = "4.2.0"
+description = "EfficientNet B0 for Steganalysis"
+authors = ["Martin Benes <martin.benes@uibk.ac.at>"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.12"
+numpy = "^1.22.0"
+conseal = "^2024.12"
+sealwatch = "^2024.3"
+setuptools = "^75.6.0"
+pillow = "^11.0.0"
+scikit-learn = "^1.6.1"
+torch = "^2.6.0"
+torchinfo = "^1.8.0"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
