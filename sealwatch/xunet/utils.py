@@ -1,39 +1,57 @@
-"""This module provides utility function for training."""
 import os
-import re
-from typing import Any, Dict
-import torch
-from torch import nn
+import numpy as np
+from glob import glob
+from PIL import Image
+import random
 
-#from .options import arguments
+def load_images(cover_path, stego_path, image_size=(32, 32), size=None, random_seed=None):
+    """
+    Loads cover and stego images from disk and returns them as numpy arrays.
 
-#opt = arguments()
+    Args:
+        cover_path (str): Path to the directory containing cover images.
+        stego_path (str): Path to the directory containing stego images.
+        image_size (tuple): Desired size of the images (height, width).
+        size (int, optional): Number of random cover-stego pairs to load. Defaults to None (load all pairs).
+        random_seed (int, optional): Seed for random selection. Defaults to None.
 
+    Returns:
+        X (np.ndarray): Array of images (cover + stego).
+        y (np.ndarray): Array of labels (0 for cover, 1 for stego).
+    """
+    # List all cover and stego image files
+    cover_files = sorted(glob(os.path.join(cover_path, "*.png")))
+    stego_files = sorted(glob(os.path.join(stego_path, "*.png")))
 
-def saver(state: Dict[str, float], save_dir: str, epoch: int) -> None:
-    torch.save(state, save_dir + "net_" + str(epoch) + ".pt")
+    # Ensure the number of cover and stego images match
+    if len(cover_files) != len(stego_files):
+        raise ValueError("Mismatch between the number of cover and stego images.")
 
+    # Set random seed for reproducibility
+    if random_seed is not None:
+        random.seed(random_seed)
 
-def latest_checkpoint(checkpoints_dir: str) -> int:
-    """Returns latest checkpoint."""
-    if os.path.exists(checkpoints_dir):
-        all_chkpts = "".join(os.listdir(checkpoints_dir))
-        if len(all_chkpts) > 0:
-            latest = max(map(int, re.findall(r"\d+", all_chkpts)))
-        else:
-            latest = None
-    else:
-        latest = None
-    return latest
+    # Randomly select a subset of pairs if size is specified
+    if size is not None:
+        indices = random.sample(range(len(cover_files)), size)
+        cover_files = [cover_files[i] for i in indices]
+        stego_files = [stego_files[i] for i in indices]
 
-# Weight initialization for conv layers and fc layers
-def weights_init(param: Any) -> None:
-    """Initializes weights of Conv and fully connected."""
+    cover_images = []
+    stego_images = []
 
-    if isinstance(param, nn.Conv2d):
-        torch.nn.init.normal_(param.weight.data, mean=0.0, std=0.01)
-        
-    elif isinstance(param, nn.Linear):
-        torch.nn.init.xavier_uniform_(param.weight.data)
-        torch.nn.init.constant_(param.bias.data, 0.0)
-        
+    # Load cover images
+    for fname in cover_files:
+        img = Image.open(fname)
+        cover_images.append(np.array(img))
+
+    # Load stego images
+    for fname in stego_files:
+        img = Image.open(fname)
+        stego_images.append(np.array(img))
+
+    # Combine cover and stego images
+    X = np.array(cover_images + stego_images, dtype=np.float32)
+    y = np.array([0] * len(cover_images) + [1] * len(stego_images), dtype=np.int64)
+
+    return X, y

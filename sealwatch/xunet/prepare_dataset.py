@@ -9,7 +9,7 @@ import pandas as pd
 from shutil import copy2
 
 
-def process_csvs(
+def process_csv(
     train_csv: str,
     test_csv: str,
     base_path: str,

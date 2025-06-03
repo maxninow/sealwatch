@@ -1,68 +1,63 @@
-"""This module is used to test the XuNet model."""
-from glob import glob
-from tqdm import tqdm
+import os
 import torch
-import numpy as np
-import imageio as io
+from torch.utils.data import DataLoader
+from torchvision import transforms
+from torchmetrics import Accuracy
+from tqdm import tqdm
+
+from .dataset import DatasetLoad
 from .model import XuNet
 
 def test_model(
-    test_batch_size = 40,
-    test_cover_path = "./data/boss/split_te_hill_cover/*.png",
-    test_stego_path = "./data/boss/split_te_hill_stego/*.png",
-    chkpt = "./checkpoints/net_65.pt"
+    test_cover_path,
+    test_stego_path,
+    model_path="./checkpoints/best_model.pt",
+    batch_size=16,
+    test_size=200,
 ):
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    cover_image_names = glob(test_cover_path)
-    stego_image_names = glob(test_stego_path)
+    # Check if the model file exists
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(f"Model file not found at {model_path}")
 
-    if len(cover_image_names) == 0 or len(stego_image_names) == 0:
-        raise ValueError("No images found in the specified paths.")
+    # Device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    cover_labels = np.zeros((len(cover_image_names)))
-    stego_labels = np.ones((len(stego_image_names)))
+    # Dataset and DataLoader
+    test_data = DatasetLoad(
+        test_cover_path, test_stego_path, test_size, transform=transforms.ToTensor()
+    )
+    test_loader = DataLoader(test_data, batch_size=batch_size, shuffle=False)
 
+    # Load model
     model = XuNet().to(device)
+    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.eval()
 
-    ckpt = torch.load(chkpt, weights_only=False)
-    model.load_state_dict(ckpt["model_state_dict"])
-    # pylint: disable=E1101
-    images = torch.empty((test_batch_size, 1, 512, 512), dtype=torch.float, device=device)
-    # pylint: enable=E1101
-    test_accuracy = []
+    # Metric
+    test_accuracy = Accuracy(task="binary").to(device)
 
-    for idx in tqdm(range(0, len(cover_image_names), test_batch_size // 2), desc="testing"):
-        cover_batch = cover_image_names[idx : idx + test_batch_size // 2]
-        stego_batch = stego_image_names[idx : idx + test_batch_size // 2]
+    # Testing loop
+    test_loss = 0
+    test_accuracy.reset()
+    loss_fn = torch.nn.NLLLoss()
+    progress_bar = tqdm(test_loader, desc="Testing")
+    with torch.no_grad():
+        for batch in progress_bar:
+            images = torch.cat((batch["cover"], batch["stego"]), 0).to(device)
+            labels = torch.cat((batch["label"][0], batch["label"][1]), 0).to(device)
 
-        batch = []
-        batch_labels = []
+            outputs = model(images)
+            loss = loss_fn(outputs, labels)
+            test_loss += loss.item()
+            test_accuracy.update(outputs.argmax(dim=1), labels)
 
-        xi = 0
-        yi = 0
-        for i in range(2 * len(cover_batch)):
-            if i % 2 == 0:
-                batch.append(stego_batch[xi])
-                batch_labels.append(1)
-                xi += 1
-            else:
-                batch.append(cover_batch[yi])
-                batch_labels.append(0)
-                yi += 1
-        # pylint: disable=E1101
-        for i in range(test_batch_size):
-            images[i, 0, :, :] = torch.tensor(io.imread(batch[i]), device=device)
-        image_tensor = images.to(device)
-        batch_labels = torch.tensor(batch_labels, dtype=torch.long, device=device)
-        # pylint: enable=E1101
-        outputs = model(image_tensor)
-        prediction = outputs.data.max(1)[1]
+            # Update progress bar
+            progress_bar.set_postfix(
+                loss=loss.item(), acc=test_accuracy.compute().item()
+            )
 
-        accuracy = (
-            prediction.eq(batch_labels.data).sum()
-            * 100.0
-            / (batch_labels.size()[0])
-        )
-        test_accuracy.append(accuracy.item())
+    # Final results
+    avg_test_loss = test_loss / len(test_loader)
+    final_test_accuracy = test_accuracy.compute().item()
 
-    print(f"test_accuracy = {sum(test_accuracy)/len(test_accuracy):.2f}")
+    return avg_test_loss, final_test_accuracy
